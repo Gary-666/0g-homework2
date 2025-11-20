@@ -1,242 +1,187 @@
-# 0G Storage Go SDK Starter Kit
+# 0g 共学营第二次作业
 
-This repository demonstrates how to integrate and use the 0G Storage Go SDK in your applications. It provides two implementation examples using the 0G decentralized storage network.
+本项目演示如何使用 0g-storage-client 生成、切分、上传和查询大文件。
 
-## Repository Branches
+## 参考资源
 
-### 1. Master Branch (Current)
-REST API implementation using Gin framework with Swagger documentation.
-```bash
-git checkout master
-```
+- **0g-storage-client**: https://github.com/0gfoundation/0g-storage-client
+- **0g-storage-go-starter-kit**: https://github.com/0gfoundation/0g-storage-go-starter-kit
+- **0G Storage SDK 文档**: https://docs.0g.ai/developer-hub/building-on-0g/storage/sdk
 
-- Features:
-  - RESTful endpoints for upload/download
-  - Swagger UI for API testing
+## 环境准备
 
-### 2. CLI Version Branch
-Command-line interface implementation available in the cli-version branch.
-```bash
-git checkout cli-version
-```
+### 1. 安装 0g-storage-client
 
-- Features:
-  - Direct file upload/download via CLI
-  - Command-line flags for configuration
+请参考官方文档安装 0g-storage-client 工具。
 
+### 2. 配置私钥（可选）
 
-## SDK Implementation (Master Branch)
+> **注意**：`.env` 文件仅在需要代码集成（如使用 Go SDK 开发应用）时才需要配置。如果只是使用 CLI 命令行工具，可以直接通过 `--key` 参数传递私钥，无需配置 `.env` 文件。
 
-### Storage Client Setup
-```go
-// Initialize storage client with network configuration
-type StorageClient struct {
-    web3Client    *blockchain.Web3Client    // For blockchain transactions
-    indexerClient *indexer.Client          // For node management
-    ctx           context.Context
-}
+创建 `.env` 文件并配置私钥（注意：请勿泄露您的私钥）：
 
-// Create a new storage client instance
-func NewStorageClient(ctx context.Context, privateKey string, useTurbo bool) (*StorageClient, error) {
-    // Initialize Web3 client for blockchain interactions
-    web3Client := blockchain.MustNewWeb3(EvmRPC, privateKey)
-
-    // Select appropriate indexer based on performance needs
-    indexerRPC := IndexerRPCStandard
-    if useTurbo {
-        indexerRPC = IndexerRPCTurbo
-    }
-
-    // Create indexer client for node selection
-    indexerClient, err := indexer.NewClient(indexerRPC)
-    if err != nil {
-        web3Client.Close()
-        return nil, fmt.Errorf("failed to create indexer client: %v", err)
-    }
-
-    return &StorageClient{
-        web3Client:    web3Client,
-        indexerClient: indexerClient,
-        ctx:           ctx,
-    }, nil
-}
-```
-
-### Understanding Upload & Download
-
-#### Upload Implementation
-The upload process involves both API handling and SDK operations. Here's how it works:
-
-1. **API Endpoint Handler**:
-```go
-func (s *Server) handleUpload(c *gin.Context) {
-    // Step 1: Receive and save uploaded file temporarily
-    file, _ := c.FormFile("file")
-    tempFile := filepath.Join(os.TempDir(), file.Filename)
-    c.SaveUploadedFile(file, tempFile)
-    defer os.Remove(tempFile)  // Cleanup after processing
-
-    // Step 2: Upload to 0G Storage network
-    txHash, rootHash, _ := s.client.UploadFile(tempFile)
-    
-    // Step 3: Return identifiers to client
-    c.JSON(http.StatusOK, UploadResponse{
-        RootHash: rootHash,  // Used for later retrieval
-        TxHash:   txHash,    // Blockchain transaction reference
-    })
-}
-```
-
-2. **Internal Upload Process**:
-```go
-func (c *StorageClient) UploadFile(filePath string) (string, string, error) {
-    // Step 1: Select storage nodes from network
-    nodes, err := c.indexerClient.SelectNodes(c.ctx, 1, DefaultReplicas, nil)
-    if err != nil {
-        return "", "", fmt.Errorf("failed to select storage nodes: %v", err)
-    }
-    
-    // Step 2: Initialize uploader with nodes
-    uploader, err := transfer.NewUploader(c.ctx, c.web3Client, nodes)
-    if err != nil {
-        return "", "", fmt.Errorf("failed to create uploader: %v", err)
-    }
-    
-    // Step 3: Set timeout and upload file
-    ctx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
-    defer cancel()
-    
-    // Step 4: Execute upload and return identifiers
-    txHash, rootHash, err := uploader.UploadFile(ctx, filePath)
-    return txHash.String(), rootHash.String(), nil
-}
-```
-
-What happens during upload:
-- File is received via multipart form upload
-- SDK selects available storage nodes
-- File is processed into chunks and a Merkle tree is created
-- Root hash are returned
-- Blockchain transaction is created and signed
-- Chunks are uploaded in parallel to storage nodes
-
-#### Download Implementation
-The download process retrieves files using their root hash. Here's the flow:
-
-1. **API Endpoint Handler**:
-```go
-func (s *Server) handleDownload(c *gin.Context) {
-    // Step 1: Get file identifier from URL
-    rootHash := c.Param("root_hash")
-    tempFile := filepath.Join(os.TempDir(), rootHash)
-    defer os.Remove(tempFile)  // Cleanup after serving
-
-    // Step 2: Download from 0G Storage network
-    err := s.client.DownloadFile(rootHash, tempFile)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-        return
-    }
-
-    // Step 3: Stream file to client
-    c.File(tempFile)
-}
-```
-
-2. **Internal Download Process**:
-```go
-func (c *StorageClient) DownloadFile(rootHash, outputPath string) error {
-    // Step 1: Find nodes storing the file
-    nodes, err := c.indexerClient.SelectNodes(c.ctx, 1, DefaultReplicas, nil)
-    if err != nil {
-        return fmt.Errorf("failed to select storage nodes: %v", err)
-    }
-    
-    // Step 2: Create downloader instance
-    downloader, err := transfer.NewDownloader(nodes)
-    if err != nil {
-        return fmt.Errorf("failed to create downloader: %v", err)
-    }
-    
-    // Step 3: Ensure output directory exists
-    if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-        return fmt.Errorf("failed to create output directory: %v", err)
-    }
-    
-    // Step 4: Download with timeout and verification
-    ctx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
-    defer cancel()
-    
-    return downloader.Download(ctx, rootHash, outputPath, true)
-}
-```
-
-What happens during download:
-- Root hash is used to locate the file in the network
-- SDK queries nodes storing the file
-- File chunks are downloaded in parallel
-- Each chunk is verified against the Merkle tree
-- File is streamed to the client
-- Complete file is assembled and verified
-
-
-## Usage
-
-1. Clone the repository:
-```bash
-git clone https://github.com/0glabs/0g-storage-go-starter-kit
-```
-
-2. Navigate to the project directory:
-```bash
-cd 0g-storage-go-starter-kit
-```
-
-3. Copy the .env.example file to .env and set your private key:
 ```bash
 cp .env.example .env
 ```
 
-4. Start the server:
+编辑 `.env` 文件：
+
+```
+PRIVATE_KEY=your_private_key_here
+```
+
+## 操作流程
+
+### 步骤 1：生成 4GB 测试文件
+
+使用 0g-storage-client 生成一个 4GB 的测试文件：
+
+```bash
+0g-storage-client gen --file test-4gb.dat --size 4294967296
+```
+
+### 步骤 2：切分文件
+
+运行 Go 程序将 4GB 文件切分为 10 个 400MB 的文件：
+
 ```bash
 go run main.go
 ```
 
-5. Access Swagger UI: http://localhost:8080/swagger/index.html
+执行后会在 `chunks/` 目录下生成以下文件：
+- `test-4gb-part-01.dat` (400MB)
+- `test-4gb-part-02.dat` (400MB)
+- ...
+- `test-4gb-part-10.dat` (400MB)
 
-6. Available Endpoints:
-   - POST /api/v1/upload - Upload a file
-     - Request: multipart/form-data with 'file' field
-     - Response: JSON with root_hash and tx_hash
-   - GET /api/v1/download/{root_hash} - Download a file
-     - Request: root_hash in URL path
-     - Response: File content stream
+### 步骤 3：批量上传文件
 
-## Network Configuration
-```go
-const (
-    EvmRPC             = "https://evmrpc-testnet.0g.ai"
-    IndexerRPCStandard = "https://indexer-storage-testnet-standard.0g.ai"
-    IndexerRPCTurbo    = "https://indexer-storage-testnet-turbo.0g.ai"
-    DefaultReplicas    = 1 // 1 is the minimum number of replicas
-)
+使用 0g-storage-client 将切分后的文件批量上传到 0G Storage 网络。
+
+**注意：请确保在项目根目录下运行命令，或使用绝对路径。**
+
+```bash
+# 上传单个文件
+0g-storage-client upload \
+  --url https://evmrpc-testnet.0g.ai \
+  --key <YOUR_PRIVATE_KEY> \
+  --indexer https://indexer-storage-testnet-turbo.0g.ai \
+  --file chunks/test-4gb-part-01.dat
+
+# 批量上传所有切分文件（Linux/Mac）
+for i in $(seq -w 1 10); do
+  0g-storage-client upload \
+    --url https://evmrpc-testnet.0g.ai \
+    --key <YOUR_PRIVATE_KEY> \
+    --indexer https://indexer-storage-testnet-turbo.0g.ai \
+    --file chunks/test-4gb-part-$i.dat
+done
+
+# 批量上传所有切分文件（Windows CMD）
+for %i in (01 02 03 04 05 06 07 08 09 10) do 0g-storage-client upload --url https://evmrpc-testnet.0g.ai --key <YOUR_PRIVATE_KEY> --indexer https://indexer-storage-testnet-turbo.0g.ai --file chunks\test-4gb-part-%i.dat
+
+# 批量上传所有切分文件（Windows PowerShell）
+1..10 | ForEach-Object {
+  $num = "{0:D2}" -f $_
+  0g-storage-client upload `
+    --url https://evmrpc-testnet.0g.ai `
+    --key <YOUR_PRIVATE_KEY> `
+    --indexer https://indexer-storage-testnet-turbo.0g.ai `
+    --file "chunks\test-4gb-part-$num.dat"
+}
 ```
 
-## Best Practices
-1. **Resource Management**:
-   - Always close web3Client using defer
-   - Use context with timeout for operations
-   - Clean up temporary files
+上传成功后会返回每个文件的 `root_hash`，请记录下来以便后续查询。
 
-2. **Error Handling**:
-   - Check node selection errors
-   - Validate file existence before upload
-   - Handle network timeouts appropriately
+### 步骤 4：查询和下载验证文件
 
-3. **Performance**:
-   - Use Turbo nodes for faster operations when needed
-   - Configure appropriate replica count
-   - Implement retry logic for failed operations
+#### 查询文件信息
 
-## Next Steps
-Explore advanced SDK features in the [0G Storage Client documentation](https://github.com/0glabs/0g-storage-client). Learn more about the [0G Storage Network](https://docs.0g.ai/0g-storage).
+通过 Indexer 的 HTTP API 查询文件信息：
+
+```bash
+# 通过 root hash 查询文件信息
+curl "https://indexer-storage-testnet-turbo.0g.ai/file/info/<ROOT_HASH>"
+
+# 示例：
+curl "https://indexer-storage-testnet-turbo.0g.ai/file/info/<ROOT_HASH>"
+
+# 批量查询多个文件
+curl "https://indexer-storage-testnet-turbo.0g.ai/files/info?cid=<ROOT_HASH_1>&cid=<ROOT_HASH_2>"
+```
+
+#### 下载验证文件
+
+使用 0g-storage-client 下载已上传的文件：
+
+```bash
+# 下载单个文件
+0g-storage-client download \
+  --indexer https://indexer-storage-testnet-turbo.0g.ai \
+  --root <ROOT_HASH> \
+  --file downloaded-part-01.dat
+
+# 示例：
+0g-storage-client download \
+  --indexer https://indexer-storage-testnet-turbo.0g.ai \
+  --root <ROOT_HASH> \
+  --file downloaded-part-01.dat
+```
+
+也可以通过 HTTP 直接下载：
+
+```bash
+# 通过 root hash 下载
+curl -O "https://indexer-storage-testnet-turbo.0g.ai/file?root=<ROOT_HASH>"
+
+# 指定下载文件名
+curl -o downloaded.dat "https://indexer-storage-testnet-turbo.0g.ai/file?root=<ROOT_HASH>&name=downloaded.dat"
+```
+
+下载完成后，可以对比原文件和下载文件的哈希值来验证完整性。
+
+## 网络配置
+
+- **EVM RPC**: `https://evmrpc-testnet.0g.ai`
+- **Indexer RPC**: `https://indexer-storage-testnet-turbo.0g.ai`
+
+## 踩坑历程
+
+### 1. Go 版本过高导致编译失败
+
+在编译 0g-storage-client 时，如果遇到以下错误：
+
+```
+link: github.com/fjl/memsize: invalid reference to runtime.stopTheWorld
+```
+
+这是因为 Go 版本过高导致的兼容性问题。需要使用以下命令进行编译：
+
+```bash
+go build -ldflags=-checklinkname=0
+```
+
+### 2. 其他操作
+
+其他操作正常按照官方文档进行即可。
+
+## 注意事项
+
+1. **私钥安全**：请妥善保管您的私钥，切勿上传到公开仓库
+2. **Gas 费用**：上传文件需要消耗 Gas，请确保账户有足够的测试币
+3. **文件大小**：每个切分文件为 400MB，总计 4GB
+
+## 项目结构
+
+```
+.
+├── main.go          # 文件切分程序
+├── .env             # 环境变量配置（私钥）
+├── .env.example     # 环境变量示例
+├── test-4gb.dat     # 生成的 4GB 测试文件
+├── chunks/          # 切分后的文件目录
+│   ├── test-4gb-part-01.dat
+│   ├── test-4gb-part-02.dat
+│   └── ...
+└── README.md        # 本文档
+```

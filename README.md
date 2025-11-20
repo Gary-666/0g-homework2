@@ -1,6 +1,6 @@
 # 0g 共学营第二次作业
 
-本项目演示如何使用 0g-storage-client 生成、切分、上传和查询大文件。
+本项目基于 [0g-storage-go-starter-kit](https://github.com/0gfoundation/0g-storage-go-starter-kit) 进行修改，演示如何使用 0g-storage-client 生成、切分、上传和查询大文件。
 
 ## 参考资源
 

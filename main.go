@@ -68,7 +68,7 @@ func (c *StorageClient) Close() {
 }
 
 func (c *StorageClient) UploadFile(filePath string) (string, string, error) {
-	nodes, err := c.indexerClient.SelectNodes(c.ctx, uint(DefaultReplicas), nil, "", true)
+	nodes, err := c.indexerClient.SelectNodes(c.ctx, uint(DefaultReplicas), nil, "random", false)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to select storage nodes: %v", err)
 	}
@@ -90,7 +90,7 @@ func (c *StorageClient) UploadFile(filePath string) (string, string, error) {
 }
 
 func (c *StorageClient) DownloadFile(rootHash, outputPath string) error {
-	nodes, err := c.indexerClient.SelectNodes(c.ctx, uint(DefaultReplicas), nil, "", true)
+	nodes, err := c.indexerClient.SelectNodes(c.ctx, uint(DefaultReplicas), nil, "random", false)
 	if err != nil {
 		return fmt.Errorf("failed to select storage nodes: %v", err)
 	}
@@ -222,6 +222,10 @@ func downloadChunks(client *StorageClient, rootHashes map[string]string) error {
 }
 
 func main() {
+	// Set proxy
+	os.Setenv("HTTP_PROXY", "http://localhost:7890")
+	os.Setenv("HTTPS_PROXY", "http://localhost:7890")
+
 	// Load .env file
 	if err := godotenv.Load(); err != nil {
 		log.Println("Warning: No .env file found")

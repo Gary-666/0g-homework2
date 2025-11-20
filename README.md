@@ -93,6 +93,10 @@ for %i in (01 02 03 04 05 06 07 08 09 10) do 0g-storage-client upload --url http
 
 上传成功后会返回每个文件的 `root_hash`，请记录下来以便后续查询。
 
+**上传成功截图：**
+
+![上传成功](img/upload-success.png)
+
 ### 步骤 4：查询和下载验证文件
 
 #### 查询文件信息
@@ -137,6 +141,10 @@ curl -O "https://indexer-storage-testnet-turbo.0g.ai/file?root=<ROOT_HASH>"
 # 指定下载文件名
 curl -o downloaded.dat "https://indexer-storage-testnet-turbo.0g.ai/file?root=<ROOT_HASH>&name=downloaded.dat"
 ```
+
+**下载成功截图：**
+
+![下载成功](img/download-success.png)
 
 下载完成后，可以对比原文件和下载文件的哈希值来验证完整性。
 

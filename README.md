@@ -14,9 +14,9 @@
 
 请参考官方文档安装 0g-storage-client 工具。
 
-### 2. 配置私钥（可选）
+### 2. 配置私钥
 
-> **注意**：`.env` 文件仅在需要代码集成（如使用 Go SDK 开发应用）时才需要配置。如果只是使用 CLI 命令行工具，可以直接通过 `--key` 参数传递私钥，无需配置 `.env` 文件。
+本项目通过 Go SDK 集成 0g-storage-client，需要配置私钥。
 
 创建 `.env` 文件并配置私钥（注意：请勿泄露您的私钥）：
 
@@ -45,7 +45,7 @@ PRIVATE_KEY=your_private_key_here
 运行 Go 程序将 4GB 文件切分为 10 个 400MB 的文件：
 
 ```bash
-go run main.go
+go run main.go split
 ```
 
 执行后会在 `chunks/` 目录下生成以下文件：
@@ -56,39 +56,17 @@ go run main.go
 
 ### 步骤 3：批量上传文件
 
-使用 0g-storage-client 将切分后的文件批量上传到 0G Storage 网络。
-
-**注意：请确保在项目根目录下运行命令，或使用绝对路径。**
+通过 Go SDK 将切分后的文件批量上传到 0G Storage 网络：
 
 ```bash
-# 上传单个文件
-0g-storage-client upload \
-  --url https://evmrpc-testnet.0g.ai \
-  --key <YOUR_PRIVATE_KEY> \
-  --indexer https://indexer-storage-testnet-turbo.0g.ai \
-  --file chunks/test-4gb-part-01.dat
+go run main.go upload
+```
 
-# 批量上传所有切分文件（Linux/Mac）
-for i in $(seq -w 1 10); do
-  0g-storage-client upload \
-    --url https://evmrpc-testnet.0g.ai \
-    --key <YOUR_PRIVATE_KEY> \
-    --indexer https://indexer-storage-testnet-turbo.0g.ai \
-    --file chunks/test-4gb-part-$i.dat
-done
+或者使用以下命令进行编译后运行（如遇到 Go 版本问题）：
 
-# 批量上传所有切分文件（Windows CMD）
-for %i in (01 02 03 04 05 06 07 08 09 10) do 0g-storage-client upload --url https://evmrpc-testnet.0g.ai --key <YOUR_PRIVATE_KEY> --indexer https://indexer-storage-testnet-turbo.0g.ai --file chunks\test-4gb-part-%i.dat
-
-# 批量上传所有切分文件（Windows PowerShell）
-1..10 | ForEach-Object {
-  $num = "{0:D2}" -f $_
-  0g-storage-client upload `
-    --url https://evmrpc-testnet.0g.ai `
-    --key <YOUR_PRIVATE_KEY> `
-    --indexer https://indexer-storage-testnet-turbo.0g.ai `
-    --file "chunks\test-4gb-part-$num.dat"
-}
+```bash
+go build -ldflags=-checklinkname=0
+./0g-storage-starter upload
 ```
 
 上传成功后会返回每个文件的 `root_hash`，请记录下来以便后续查询。
@@ -97,9 +75,38 @@ for %i in (01 02 03 04 05 06 07 08 09 10) do 0g-storage-client upload --url http
 
 ![上传成功](img/upload-success.png)
 
-### 步骤 4：查询和下载验证文件
+### 步骤 4：下载验证文件
 
-#### 查询文件信息
+通过 Go SDK 下载已上传的文件：
+
+```bash
+# 下载单个文件
+go run main.go download <ROOT_HASH> [output_filename]
+
+# 示例：
+go run main.go download 0x123456... downloaded-part-01.dat
+```
+
+下载的文件会保存在 `downloads/` 目录下。
+
+**下载成功截图：**
+
+![下载成功](img/download-success.png)
+
+### 一键执行所有步骤
+
+也可以使用 `all` 命令一次性执行切分、上传和下载验证：
+
+```bash
+go run main.go all
+```
+
+这将依次执行：
+1. 切分文件
+2. 上传所有切分文件
+3. 下载所有文件进行验证
+
+#### 查询文件信息（可选）
 
 通过 Indexer 的 HTTP API 查询文件信息：
 
@@ -107,46 +114,9 @@ for %i in (01 02 03 04 05 06 07 08 09 10) do 0g-storage-client upload --url http
 # 通过 root hash 查询文件信息
 curl "https://indexer-storage-testnet-turbo.0g.ai/file/info/<ROOT_HASH>"
 
-# 示例：
-curl "https://indexer-storage-testnet-turbo.0g.ai/file/info/<ROOT_HASH>"
-
 # 批量查询多个文件
 curl "https://indexer-storage-testnet-turbo.0g.ai/files/info?cid=<ROOT_HASH_1>&cid=<ROOT_HASH_2>"
 ```
-
-#### 下载验证文件
-
-使用 0g-storage-client 下载已上传的文件：
-
-```bash
-# 下载单个文件
-0g-storage-client download \
-  --indexer https://indexer-storage-testnet-turbo.0g.ai \
-  --root <ROOT_HASH> \
-  --file downloaded-part-01.dat
-
-# 示例：
-0g-storage-client download \
-  --indexer https://indexer-storage-testnet-turbo.0g.ai \
-  --root <ROOT_HASH> \
-  --file downloaded-part-01.dat
-```
-
-也可以通过 HTTP 直接下载：
-
-```bash
-# 通过 root hash 下载
-curl -O "https://indexer-storage-testnet-turbo.0g.ai/file?root=<ROOT_HASH>"
-
-# 指定下载文件名
-curl -o downloaded.dat "https://indexer-storage-testnet-turbo.0g.ai/file?root=<ROOT_HASH>&name=downloaded.dat"
-```
-
-**下载成功截图：**
-
-![下载成功](img/download-success.png)
-
-下载完成后，可以对比原文件和下载文件的哈希值来验证完整性。
 
 ## 网络配置
 
@@ -183,7 +153,7 @@ go build -ldflags=-checklinkname=0
 
 ```
 .
-├── main.go          # 文件切分程序
+├── main.go          # 文件切分、上传、下载程序（集成 0g-storage-client SDK）
 ├── .env             # 环境变量配置（私钥）
 ├── .env.example     # 环境变量示例
 ├── test-4gb.dat     # 生成的 4GB 测试文件
@@ -191,5 +161,21 @@ go build -ldflags=-checklinkname=0
 │   ├── test-4gb-part-01.dat
 │   ├── test-4gb-part-02.dat
 │   └── ...
+├── downloads/       # 下载验证的文件目录
+├── img/             # 截图目录
+│   ├── upload-success.png
+│   └── download-success.png
 └── README.md        # 本文档
+```
+
+## 可用命令
+
+```bash
+go run main.go <command>
+
+# 命令列表：
+#   split    - 将 4GB 文件切分为 10 个 400MB 的文件
+#   upload   - 将所有切分文件上传到 0G Storage
+#   download - 从 0G Storage 下载文件（需要 root hash）
+#   all      - 一键执行切分、上传和下载验证
 ```
